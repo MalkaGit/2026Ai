@@ -163,6 +163,7 @@ The system is intentionally minimal while demonstrating:
 
 ---
 ## 🧱 Project Structure
+
 src/
    api/
       chat/
