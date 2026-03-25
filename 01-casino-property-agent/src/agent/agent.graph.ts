@@ -72,9 +72,20 @@ function buildGraph() {
 
 
 async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState>> {
+ 
+  //if (!env.openAiApiKey) {
+  //  throw new Error("OPENAI_API_KEY is required to generate answers.");
+  //}
+
+  //if the OPENAI_API_KEY is not set, use a fallback answer
   if (!env.openAiApiKey) {
-    throw new Error("OPENAI_API_KEY is required to generate answers.");
+    return {
+      answer: buildFallbackAnswer(state),
+      grounded: state.retrievedChunks.length > 0
+    };
   }
+
+
   if (state.retrievedChunks.length === 0) {
     return {
       answer:
@@ -117,6 +128,18 @@ return {
   };
 }
 
+
+function buildFallbackAnswer(state: AgentState): string {
+  //returns no answer when the api key is not set in the environment variables
+  if (state.retrievedChunks.length === 0) {
+    return "I do not know based on the provided property information.";
+  }
+
+  // Very simple fallback: return first chunk summary
+  const firstChunk = state.retrievedChunks[0];
+
+  return `Based on the property information:\n\n${firstChunk.slice(0, 300)}...`;
+}
 
 async function scopeCheckNode(state: AgentState): Promise<Partial<AgentState>> {
   const scopeResult = evaluateQuestionScope(state.question);
