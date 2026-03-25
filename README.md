@@ -38,6 +38,7 @@ The agent:
       Run
       docker run --env-file .env -p 3000:3000 casino-property-agent
 
+      note: if .evn has no api key, there is a fallbakck (no setup, no key)
 
 ### to run without docker
 
@@ -50,6 +51,7 @@ The agent:
       OPENAI_API_KEY=your_key_here - optional
    3. Run the app
       npm run dev
+      note: if .evn has no api key, there is a fallbakck (no setup, no key)
 
 
 ### to test API  from psotman 

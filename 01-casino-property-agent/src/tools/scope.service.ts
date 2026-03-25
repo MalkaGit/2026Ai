@@ -1,25 +1,26 @@
 /**
- * scope.service.ts
- * Evaluates the scope of a question to determine if the agent can answer it.
+ * Checks if the agent can answer the question (before calling the LLM)
+ * @param question - the question to evaluate
+ * @returns the scope check result
+ * if the question is about an action, return false
+ * if the question is not about a property, return false
  */
-
 export function evaluateQuestionScope(question: string): ScopeCheckResult {
   if (isActionRequest(question)) {
     return {
       isInScope: false,
-      rejectionReason:
-        "I can answer questions about the property, but I cannot make bookings, reservations, payments, or account changes."
+      rejectionReason: "I can answer questions about the property, but I cannot make bookings, reservations, payments, or account changes."
     };
   }
 
-if (!isPropertyQuestion(question)) {
+  if (!isPropertyQuestion(question)) {
     return {
       isInScope: false,
-      rejectionReason:
-        "I can only answer questions about the loaded casino property and its amenities, rooms, dining, entertainment, and related guest information."
+      rejectionReason:  "I can only answer questions about the loaded casino property and its amenities, rooms, dining, entertainment, and related guest information."
     };
   }
-return {
+
+  return {
     isInScope: true
   };
 }
@@ -29,8 +30,11 @@ export interface ScopeCheckResult {
   rejectionReason?: string;
 }
 
-
-
+/**
+ * Checks if the question is about an action
+ * @param question - the question to evaluate
+ * @returns true if the question is about an action, false otherwise
+ */
 function isActionRequest(question: string): boolean {
     const normalized = question.toLowerCase();
   const actionPhrases = [
@@ -46,10 +50,14 @@ function isActionRequest(question: string): boolean {
       "check my account"
     ];
   return actionPhrases.some((phrase) => normalized.includes(phrase));
-  }
+}
 
 
-  
+/**
+ * Checks if the question is about a property
+ * @param question - the question to evaluate
+ * @returns true if the question is about a property, false otherwise
+ */
 function isPropertyQuestion(question: string): boolean {
     const normalized = question.toLowerCase();
   const propertyKeywords = [
