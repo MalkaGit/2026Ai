@@ -1,6 +1,5 @@
 ##  Overview
-This project implements a conversational AI system 
-for a casino hospitality use case.
+This project implements a conversational AI system for a casino hospitality.
 
 The agent can answer questions about:
 - restaurants
@@ -10,7 +9,7 @@ The agent can answer questions about:
 - promotions
 
 The agent:
-- ✅ answers only based on a single loaded property
+- ✅ answers only based on a single loaded property 
 - ❌ does not perform actions (no booking, reservations, payments)
 - ❌ does not answer unrelated questions
 
@@ -18,8 +17,8 @@ The agent:
 
 ## Architecture
 
--The agent answers questions about a single casino property
- using only local knowledge.
+-The agent answers questions about a single casino property 
+ using only local knowledge (src\knowledge\property.md).
 
 -AI agent built using **LangGraph**.  
 
@@ -55,14 +54,32 @@ The agent:
 
 
 ### to test API  from psotman 
-
+   
    GET http://localhost:3000/health
 
    POST http://localhost:3000/chat 
    "Content-Type: application/json" 
    {"message":"What restaurants are there?"}
 
+   postman collection stored at: 
+   \01-casino-property-agent\tests\_tests.postman_collection
+               
+               ✅ In-scope question
+               What restaurants are there?
+               → Returns grounded answer
 
+               ✅  Missing information
+               What is the check-in age policy?
+               → Returns:
+               I do not know based on the provided property information.
+
+               ✅ Action request
+               Book me a room
+               → Rejected
+
+               ✅ Out-of-scope question
+               What is the weather in Boston?
+               → Rejected
 
 ### Automated Tests
    Run:
@@ -75,31 +92,14 @@ The agent:
 
 
 
-               ✅ Example Scenarios
-               In-scope question
-               What restaurants are there?
-               → Returns grounded answer
-
-               Missing information
-               What is the check-in age policy?
-               → Returns:
-               I do not know based on the provided property information.
-
-               Action request
-               Book me a room
-               → Rejected
-
-               Out-of-scope question
-               What is the weather in Boston?
-               → Rejected
+               
 
 
 ---
 ## 🧠 Architecture
-The system is structured around an **LLM orchestration flow**, 
-not a traditional CRUD backend.
-### Flow
-HTTP request → LangGraph agent → nodes → response
+
+### Flow (**LLM orchestration flow**)
+Pipe iincludes: HTTP request → LangGraph agent → nodes → response
 
 ### Graph Nodes
 1. **Scope Check**
@@ -109,7 +109,7 @@ HTTP request → LangGraph agent → nodes → response
      - unrelated questions
 2. **Context Retrieval**
    - Extracts relevant sections from property knowledge
-   - Uses keyword-based matching
+   - Uses exact string matching (nessage V knowledge chunk)
 3. **Answer Generation**
    - LLM generates answer using only retrieved context
    - If context is missing → returns “I don’t know”
@@ -124,7 +124,7 @@ This is preferred over a “black-box” agent.
 
 ---
 ## 📚 Knowledge Handling
-- The agent loads a single property file (`property.md`)
+- The agent loads a single property file (knwledge\`property.md`)
 - Retrieval is:
   - simple
   - deterministic
@@ -138,17 +138,18 @@ A simple keyword-based retrieval is sufficient and easier to test.
 
 
 ⚠️ Limitations
-	• Single property only
-	• Simple keyword-based retrieval
+	• Single property only               (knwledge\`property.md`)
+	• Simple keyword-based retrieval     (exact match and not semilarity)
 	• No conversation memory
-	• No external integrations
+	• No external integrations           (eg, ingesting property data from web)
 
 
 🔮 Future Improvements
-	• Add embeddings / vector search
 	• Multi-property support
+ 	• Better semantic scope detection
+     (match question to property chunck by semilarity)
+	• Add embeddings / vector search 
 	• Conversation memory
-	• Better semantic scope detection
 	• Observability (tracing)
 
 
