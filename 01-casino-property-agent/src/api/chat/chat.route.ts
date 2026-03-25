@@ -1,26 +1,23 @@
 /**
  * chat.route.ts
- * Handles the chat API request.
- * Instead having controller, the route acts as the controller, 
- * by calling the agent to answer the question and returning the result.
- * The main orchestration happens in the LangGraph agent,
- * so adding another layer would not add value.”
+ * Handles chat API request.
+ * Notes:
+ * - the route acts as the controller, by calling the agent
+ * - orchestration happens in the LangGraph agent, 
+ *   so adding controller would not add value.”
  */
 import { askPropertyAgent } from "../../agent/agent.graph.js";
 import { Router } from "express";
+import { ChatRequest, chatRequestSchema, ChatResponse } from "./chat.types.js";
 import { z } from "zod";
-import { ChatRequest, ChatResponse } from "./chat.types.js";
+
 
 const router = Router();
 
-const chatRequestSchema = z.object({
-  message: z.string().min(1, "message is required")
-});
-
 router.post("/", async (req, res) => {
   try {
-    // Validate request shape before any agent work starts.
-    const parsed : ChatRequest = chatRequestSchema.parse(req.body);
+    
+    const parsed : ChatRequest = chatRequestSchema.parse(req.body);       //if validation fails, the request is rejected
     const result : ChatResponse = await askPropertyAgent(parsed.message);
     res.status(200).json(result);
   } catch (error) {
@@ -36,4 +33,5 @@ router.post("/", async (req, res) => {
     });
   }
 });
+
 export default router;
