@@ -1,6 +1,24 @@
 /**
  * agent.graph.ts
- * Orchestrates the agent's behavior using LangGraph.
+ * Generates answer to a given question based on the property knowledge.
+ * - requirements
+ *   request for actions is rejected (no booking, reservations, payments)
+ *   request for unrelated questions is rejected
+ *   answer is based on the property knowledge file (property.md)
+ *   use langraph to define the agent flow (flowchart \ pipe)
+ * - agent steps:
+ *      1. scopeCheck:       determines if the question is allowed
+ *      2. reject            (optional)
+ *      3. retrieveContext:  search sections within the property knowledge that are relevent to the question
+ *                          (using exact token match and not semilarity)
+ *      4. answerQuestion:   use LLM to generate answer based on the retrieved context
+ * - Limitations:
+ * - knowledge is limited to a single property knowledge file (property.md)
+ *   no multi-property support
+ * - no external integrations 
+ *   knwolege is extracted from property file.
+ *   later on we can ingest knowledge from other sources.
+ * - no conversation memory 
  */
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
@@ -11,36 +29,10 @@ import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.prompts.js";
 import type { AgentState } from "../agent/agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
+import { AIMessageChunk } from "@langchain/core/messages";
 
-
-export async function askPropertyAgent(question: string): Promise<ChatResponse> {
-  console.log("USING agent.graph.ts", { question });
-  const propertyContent = loadPropertyMarkdown();
-  const initialState: AgentState = {
-    question,
-    propertyName: env.propertyName,
-    propertyContent,
-    isInScope: false,
-    rejectionReason: undefined,
-    retrievedChunks: [],
-    citations: [],
-    answer: "",
-    grounded: false
-  };
-  const result : Partial<AgentState> = await propertyGraph.invoke(initialState);
-  console.log("result", result);
-  const chatResponse: ChatResponse = {
-    answer: result.answer ?? "",
-    property: env.propertyName,
-    grounded: result.grounded ?? false,
-    citations: result.citations ?? []
-  };
-  return chatResponse;
-}
-
-
+//defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
-
 function buildGraph() {
   return new StateGraph<AgentState>({
     channels: {
@@ -70,22 +62,66 @@ function buildGraph() {
     .compile();
 }
 
+//main function to ask the agent a question
+export async function askPropertyAgent(question: string): Promise<ChatResponse> {
+   const propertyContent = loadPropertyMarkdown();
+  const initialState: AgentState = {
+    question,
+    propertyName: env.propertyName,
+    propertyContent,
+    isInScope: false,
+    rejectionReason: undefined,
+    retrievedChunks: [],
+    citations: [],
+    answer: "",
+    grounded: false
+  };
+  const finalState : Partial<AgentState> = await propertyGraph.invoke(initialState);
+  console.log("result", finalState);
+  const chatResponse: ChatResponse = {
+    answer: finalState.answer ?? "",
+    property: env.propertyName,
+    grounded: finalState.grounded ?? false,
+    citations: finalState.citations ?? []
+  };
+  return chatResponse;
+}
+
+
+
+async function scopeCheckNode(state: AgentState): Promise<Partial<AgentState>> {
+  const scopeResult = evaluateQuestionScope(state.question);
+return {
+    isInScope: scopeResult.isInScope,
+    rejectionReason: scopeResult.rejectionReason
+  };
+}
+
+function routeAfterScope(state: AgentState): string {
+  return state.isInScope ? "retrieveContext" : "reject";
+}
+
+async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
+  return {
+    answer:
+      state.rejectionReason ??
+      "I can only answer questions about the loaded casino property.",
+    grounded: false,
+    citations: []
+  };
+}
+
+async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
+  const result = searchPropertyContent(state.question, state.propertyContent);
+return {
+    retrievedChunks: result.chunks,
+    citations: result.citations
+  };
+}
 
 async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState>> {
- 
-  //if (!env.openAiApiKey) {
-  //  throw new Error("OPENAI_API_KEY is required to generate answers.");
-  //}
 
-  //if the OPENAI_API_KEY is not set, use a fallback answer
-  if (!env.openAiApiKey) {
-    return {
-      answer: buildFallbackAnswer(state),
-      grounded: state.retrievedChunks.length > 0
-    };
-  }
-
-
+  //case1: couldnt find relevant information in the knowledge file
   if (state.retrievedChunks.length === 0) {
     return {
       answer:
@@ -93,21 +129,30 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
       grounded: false
     };
   }
-  //creating instance if the LLM model (this case we are using the OpenAI API)
+  //case2: LLM api key is not set in the environment variables
+  if (!env.openAiApiKey) {
+    return {
+      answer: buildFallbackAnswerWithoutLLM(state),
+      grounded: state.retrievedChunks.length > 0
+    };
+  }
+
+  //case3: call LLM api to generate answer based on context retrieved from the knowledge file
   const model = new ChatOpenAI({
     apiKey: env.openAiApiKey,
     model: "gpt-4o-mini",
     temperature: 0
   });
+  const systemRules: string = SYSTEM_RULES;
   const prompt: string = buildAnswerPrompt({
     propertyName: state.propertyName,
     question: state.question,
     contextChunks: state.retrievedChunks
   });
-const response = await model.invoke([
+const response :AIMessageChunk = await model.invoke([
     {
       role: "system",
-      content: SYSTEM_RULES
+      content: systemRules
     },
     {
       role: "user",
@@ -129,57 +174,21 @@ return {
 }
 
 
-function buildFallbackAnswer(state: AgentState): string {
+function buildFallbackAnswerWithoutLLM(state: AgentState): string {
+  //when LLM api key is not set in the environment variables
+  //we return a fallback answer (the first chunck that we found in the property file using token search)
   //returns no answer when the api key is not set in the environment variables
   if (state.retrievedChunks.length === 0) {
     return "I do not know based on the provided property information.";
   }
 
-  // Very simple fallback: return first chunk summary
   const firstChunk = state.retrievedChunks[0];
 
-  return `Based on the property information:\n\n${firstChunk.slice(0, 300)}...`;
-}
-
-async function scopeCheckNode(state: AgentState): Promise<Partial<AgentState>> {
-  const scopeResult = evaluateQuestionScope(state.question);
-return {
-    isInScope: scopeResult.isInScope,
-    rejectionReason: scopeResult.rejectionReason
-  };
+  return `API key is missing. Based on the property information:\n\n${firstChunk.slice(0, 300)}...`;
 }
 
 
 
-async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
-  const result = searchPropertyContent(state.question, state.propertyContent);
-return {
-    retrievedChunks: result.chunks,
-    citations: result.citations
-  };
-}
-
-
-
-
-
-
-
-
-function routeAfterScope(state: AgentState): string {
-  return state.isInScope ? "retrieveContext" : "reject";
-}
-
-
-async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
-  return {
-    answer:
-      state.rejectionReason ??
-      "I can only answer questions about the loaded casino property.",
-    grounded: false,
-    citations: []
-  };
-}
 
 
 
