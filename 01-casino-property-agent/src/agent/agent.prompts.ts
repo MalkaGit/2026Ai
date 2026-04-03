@@ -1,6 +1,7 @@
 /**
  * agent.prompts.ts
  * Instructions for the agent.
+ * This is simple text that can be used by any LLM provider.
  */
 
 
@@ -21,7 +22,9 @@ If the user asks to make a booking/reservation/action, refuse politely and expla
 `.trim();
 }
 
-
+/**
+ * string that is sent to the LLM model with instructions for the agent.
+ */
 export const SYSTEM_RULES = `
 You are a property-aware casino hospitality assistant.
 Rules:

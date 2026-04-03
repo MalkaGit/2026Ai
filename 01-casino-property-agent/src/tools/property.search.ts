@@ -1,5 +1,15 @@
   /**
-   * use text seatch to find the most relevant sections (chunks) in the knowledge content (knowledge\property.md)
+   * search/retreive step
+   * given the user's question, 
+   * the method finds the the most relevant sections (chunks) in the knowledge (knowledge\property.md)
+   * using  simple keyword-based retrieval (exact match) for now.
+   * later on we can use semantic similarity to find the most relevant sections.
+   * Steps:
+   *   • splits the property markdown into sections by ##
+   *   • tokenizes the question
+   *   • scores sections by keyword overlap
+   *   • returns top matching sections
+   * 
    * @param question - the user's question
    * @param propertyContent - knowledge content (content of knowledge\property.md)
    * @param maxChunks - the maximum number of chunks to return (default is 3)

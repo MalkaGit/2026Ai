@@ -1,23 +1,24 @@
 /**
  * agent.graph.ts
  * Generates answer to a given question based on the property knowledge.
- * - requirements
- *   request for actions is rejected (no booking, reservations, payments)
- *   request for unrelated questions is rejected
- *   answer is based on the property knowledge file (property.md)
- *   use langraph to define the agent flow (flowchart \ pipe)
- * - agent steps:
+ * agent steps (steps are implemented as graph nodes using langraph):
  *      1. scopeCheck:       determines if the question is allowed
+ * *                        - request for actions is rejected (no booking, reservations, payments)
+ *                          - request for unrelated questions is rejected
  *      2. reject            (optional)
- *      3. retrieveContext:  search sections within the property knowledge that are relevent to the question
- *                          (using exact token match and not semilarity)
- *      4. answerQuestion:   use LLM to generate answer based on the retrieved context
+ *      3. retrieve Context:  search sections within the property knowledge that are relevent to the question
+ *                           for now, using exact match.
+ *                                    eg, it can answer "what restaurants are there?" by finding the "Restaurants" section in the property file.
+ *                                    but it cannot answer "where can i eat around the  casino ?" because the "there is no eat keyworkd in the property file"
+ *                                    chunk rank is the number of tokens from the question that are found in the chunk)
+ *                           later on, we can use similarity search to find the most relevant chunks
+ *                                     eg, eat and restaurant are similar, but eat and weather are not
+ *                           later on, we can use embedding search (2 words are semialr if their vector distance is small)   
+ *      4. LLM               pass the LLM the chunks that we found, to generate answers based on it 
  * - Limitations:
  * - knowledge is limited to a single property knowledge file (property.md)
  *   no multi-property support
- * - no external integrations 
- *   knwolege is extracted from property file.
- *   later on we can ingest knowledge from other sources.
+ *   later on we can ingest knowledge from other files and sources.
  * - no conversation memory 
  */
 import { StateGraph, START, END } from "@langchain/langgraph";
@@ -30,12 +31,14 @@ import type { AgentState } from "../agent/agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";
+import { createChatModel } from "./llm.factory.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
 function buildGraph() {
   return new StateGraph<AgentState>({
     channels: {
+      //the agent state is passed between nodes as a dictionary of values
       question: null,
       propertyName: null,
       propertyContent: null,
@@ -129,27 +132,25 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
       grounded: false
     };
   }
-  //case2: LLM api key is not set in the environment variables
-  if (!env.openAiApiKey) {
+
+
+  //case2: couldnt create llm model by configuration (eg, invalid .evv file)
+  const model = createChatModel();
+  if (!model) {
     return {
       answer: buildFallbackAnswerWithoutLLM(state),
       grounded: state.retrievedChunks.length > 0
     };
   }
 
-  //case3: call LLM api to generate answer based on context retrieved from the knowledge file
-  const model = new ChatOpenAI({
-    apiKey: env.openAiApiKey,
-    model: "gpt-4o-mini",
-    temperature: 0
-  });
+  //case3: call llm api to generate answer based on context retrieved from the knowledge file
   const systemRules: string = SYSTEM_RULES;
   const prompt: string = buildAnswerPrompt({
     propertyName: state.propertyName,
     question: state.question,
     contextChunks: state.retrievedChunks
   });
-const response :AIMessageChunk = await model.invoke([
+  const response :AIMessageChunk = await model.invoke([
     {
       role: "system",
       content: systemRules
@@ -159,7 +160,7 @@ const response :AIMessageChunk = await model.invoke([
       content: prompt
     }
   ]);
-const answerText =
+  const answerText =
     typeof response.content === "string"
       ? response.content
       : Array.isArray(response.content)
@@ -167,7 +168,7 @@ const answerText =
             .map((item) => ("text" in item ? item.text : ""))
             .join("")
         : "I do not know based on the provided property information.";
-return {
+  return {
     answer: answerText.trim(),
     grounded: true
   };
