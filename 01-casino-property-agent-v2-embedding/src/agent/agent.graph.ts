@@ -115,7 +115,7 @@ async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
 }
 
 async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
-  const result = searchPropertyContent(state.question, state.propertyContent);
+  const result = await searchPropertyContent(state.question, state.propertyContent);
 return {
     retrievedChunks: result.chunks,
     citations: result.citations

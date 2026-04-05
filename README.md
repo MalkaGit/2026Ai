@@ -42,6 +42,7 @@ The agent:
 ### to run without docker
 
    1. Install dependencies
+      c:\dev\repos\node\2026Ai\01-casino-property-agent-v2-embedding
       npm install
    2. Configure environment
       Create .env:

@@ -7,6 +7,14 @@ export const env = {
   propertyName: process.env.PROPERTY_NAME ?? "Mohegan Sun",
   llmProvider: requiredEnumProvider(),
 
+  //embeddings
+  //for openai embeddings
+  openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
+  retrievalTopK: Number(process.env.RETRIEVAL_TOP_K ?? 3), //the number of chunks to return
+  retrievalMinScore: Number(process.env.RETRIEVAL_MIN_SCORE ?? 0.15), //chunks scored below this score will be excluded
+
+
+  //LLM
   //for openai as LLM provider
   openAiApiKey: optional("OPENAI_API_KEY"),
   openAiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
@@ -33,20 +41,3 @@ function requiredEnumProvider(): LlmProvider {
   }
   throw new Error(`Invalid LLM_PROVIDER: ${raw}`);
 }
-
-
-/**
-//when using only openai as LLM provider
-import "dotenv/config";
-
-function getOptionalEnv(name: string): string | undefined {
-  const value = process.env[name];
-  return value && value.trim() !== "" ? value : undefined;
-}
-
-export const env = {
-  port: Number(process.env.PORT ?? 3000),
-  openAiApiKey: getOptionalEnv("OPENAI_API_KEY"),
-  propertyName: process.env.PROPERTY_NAME ?? "Mohegan Sun"
-};
-*/
