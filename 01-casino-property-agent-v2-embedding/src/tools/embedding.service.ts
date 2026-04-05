@@ -1,4 +1,5 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
+import { createEmbeddingModel } from "./embedding.factory.js";
 import { env } from "../config/env.js";
 
 /**
@@ -43,10 +44,7 @@ function getEmbeddingModel(): OpenAIEmbeddings {
     );
   }
   if (!embeddingsClient) {
-    embeddingsClient = new OpenAIEmbeddings({
-      apiKey: env.openAiApiKey,
-      model: env.openAiEmbeddingModel
-    });
+    embeddingsClient = createEmbeddingModel();
   }
   return embeddingsClient;
 }

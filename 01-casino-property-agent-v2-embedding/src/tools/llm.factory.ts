@@ -19,22 +19,7 @@
 import { env } from "../config/env.js";
 import { ChatOpenAI } from "@langchain/openai";
 
-export function createChatModel() : ChatOpenAI | null {
-      //v2- embedding is supported only with openai for now
-      //not free of charge
-      if (!env.openAiApiKey) {
-        console.error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
-        return null;
-      }
-      console.log(`creating llm provider by configuration for: ${env.llmProvider}`);
-      return new ChatOpenAI({
-        apiKey: env.openAiApiKey,
-        model:  env.openAiModel,
-        temperature: 0
-      });
-}
-    
-/*
+  
 export function createChatModel() : ChatOpenAI | null {
   switch (env.llmProvider) {
     case "openai": {
@@ -86,4 +71,3 @@ export function createChatModel() : ChatOpenAI | null {
     }
   }
 }
-*/

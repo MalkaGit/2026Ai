@@ -31,7 +31,7 @@ import type { AgentState } from "../agent/agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";
-import { createChatModel } from "./llm.factory.js";
+import { createChatModel } from "../tools/llm.factory.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
