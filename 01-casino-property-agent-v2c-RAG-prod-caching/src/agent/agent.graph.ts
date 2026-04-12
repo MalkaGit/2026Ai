@@ -25,13 +25,13 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { env } from "../config/env.js";
 import { loadPropertyMarkdown } from "../tools/property.loader.js";
-import { searchPropertyContent } from "../tools/property.search.js";
+import { searchProperty } from "../tools/property.search.orchestrator.js";
 import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.prompts.js";
-import type { AgentState } from "./agent.state.js";
+import type { AgentState } from "../agent/agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";
-import { createChatModel } from "./llm.factory.js";
+import { createChatModel } from "../tools/llm.factory.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
@@ -115,8 +115,9 @@ async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
 }
 
 async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
-  const result = searchPropertyContent(state.question, state.propertyContent);
-return {
+  const result = await searchProperty(state.question, state.propertyContent);
+  console.log("retrieval method:", result.retrievalMethod, "topScore:", result.topScore);
+  return {
     retrievedChunks: result.chunks,
     citations: result.citations
   };
