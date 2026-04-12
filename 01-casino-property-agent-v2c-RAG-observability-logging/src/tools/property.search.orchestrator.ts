@@ -1,5 +1,6 @@
 /**
  * property.search.hybrid.ts
+ *  retrieval orchestration only
  * Responsibility: orchestration only (implemnting fallback)
  * Short: orchestrates the retrival flow
  *        including fallback logic (property search)
@@ -16,6 +17,7 @@ import { env } from "../config/env.js";
 import { type PropertySearchResult } from "./property.search.shared.js";
 import { searchPropertyByEmbedding } from "./property.search.embedding.js";
 import { searchPropertyByKeyword } from "./property.search.keyword.js";
+import { logWarn } from "../infra/logging/logger.js";
 /**
  * property.search.orchestrator.ts
  * Responsibility: orchestration only (implemnting fallback)
@@ -52,14 +54,26 @@ export async function searchProperty(
 
     if (result.chunks.length > 0) {
       return result;
-    }
+    } else {
+      logWarn("retrieval.embedding.empty_fallback_to_keyword", {
+        question,
+        topScore: result.topScore
+      });
+    }  
     
     //step2: if embedding retrieval returns no chunks, fallback to keyword retrieval
     result = await searchPropertyByKeyword(question, propertyContent, maxChunks);
     return result;
 
   } catch (error) {
-    console.warn("Embedding retrieval failed. Falling back to keyword retrieval.", error);
+    //console.warn("Embedding retrieval failed. Falling back to keyword retrieval.", error);
+    logWarn("retrieval.embedding.failed_fallback_to_keyword", {
+      question,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : error
+    });
     result = await searchPropertyByKeyword(question, propertyContent, maxChunks);
     return result;
   }

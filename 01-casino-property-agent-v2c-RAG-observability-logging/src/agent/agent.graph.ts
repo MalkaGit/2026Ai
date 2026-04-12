@@ -1,5 +1,6 @@
 /**
  * agent.graph.ts
+ * business flow only
  * Generates answer to a given question based on the property knowledge.
  * agent steps (steps are implemented as graph nodes using langraph):
  *      1. scopeCheck:       determines if the question is allowed
@@ -27,11 +28,12 @@ import { env } from "../config/env.js";
 import { loadPropertyMarkdown } from "../tools/property.loader.js";
 import { searchProperty } from "../tools/property.search.orchestrator.js";
 import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.prompts.js";
-import type { AgentState } from "../agent/agent.state.js";
+import type { AgentState } from "./agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";
 import { createChatModel } from "../tools/llm.factory.js";
+import { traceAgentStart, traceAgentRetrieval, traceAgentNoContext, traceAgentFinish, traceAgentFailure } from "../infra/logging/ai.logger.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
@@ -67,7 +69,16 @@ function buildGraph() {
 
 //main function to ask the agent a question
 export async function askPropertyAgent(question: string): Promise<ChatResponse> {
-   const propertyContent = loadPropertyMarkdown();
+  const startedAt = Date.now();
+  try {
+  const propertyContent = loadPropertyMarkdown();
+   traceAgentStart({                                            //ovservability: start of the agent
+    question,
+    propertyName: env.propertyName
+  });
+
+
+  
   const initialState: AgentState = {
     question,
     propertyName: env.propertyName,
@@ -87,7 +98,25 @@ export async function askPropertyAgent(question: string): Promise<ChatResponse> 
     grounded: finalState.grounded ?? false,
     citations: finalState.citations ?? []
   };
+
+  traceAgentFinish({                                 //ovservability: finish of the agent
+    question,
+    grounded: chatResponse.grounded,
+    citations: chatResponse.citations,
+    answerLength: chatResponse.answer.length,
+    durationMs: Date.now() - startedAt
+  });
+
   return chatResponse;
+}
+catch (error) {
+  traceAgentFailure({
+    question: question,
+    durationMs: Date.now() - startedAt,
+    error
+  });
+  throw error;
+}
 }
 
 
@@ -116,7 +145,15 @@ async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
 
 async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
   const result = await searchProperty(state.question, state.propertyContent);
-  console.log("retrieval method:", result.retrievalMethod, "topScore:", result.topScore);
+  //console.log("retrieval method:", result.retrievalMethod, "topScore:", result.topScore);
+  traceAgentRetrieval({
+    question: state.question,
+    retrievalMethod: result.retrievalMethod,
+    topScore: result.topScore,
+    citations: result.citations,
+    retrievedChunkCount: result.chunks.length
+  });
+
   return {
     retrievedChunks: result.chunks,
     citations: result.citations
@@ -127,6 +164,7 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
 
   //case1: couldnt find relevant information in the knowledge file
   if (state.retrievedChunks.length === 0) {
+    traceAgentNoContext(state.question);
     return {
       answer:
         "I do not know based on the provided property information.",
