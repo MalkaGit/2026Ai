@@ -92,6 +92,11 @@ The agent:
       LLM responses are not strictly asserted to avoid brittle tests.
 
 
+### to run evaluation (with mock) 
+    goal: evaluate the proerty.search 
+    cd c:\dev\repos\node\2026Ai\01-casino-property-agent-vxxxxxx
+     npx tsx evaluation/retrieval.eval.ts
+
 
                
 

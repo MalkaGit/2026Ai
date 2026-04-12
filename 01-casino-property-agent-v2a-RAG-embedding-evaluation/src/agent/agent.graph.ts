@@ -27,7 +27,7 @@ import { env } from "../config/env.js";
 import { loadPropertyMarkdown } from "../tools/property.loader.js";
 import { searchPropertyContent } from "../tools/property.search.js";
 import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.prompts.js";
-import type { AgentState } from "../agent/agent.state.js";
+import type { AgentState } from "./agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";

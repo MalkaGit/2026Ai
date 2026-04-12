@@ -1,4 +1,4 @@
-import { searchPropertyContent } from "../src/tools/property.search.js"; //the method we check
+import { searchProperty } from "../src/tools/property.search.orchestrator.js"; //the method we check
 import { retrievalDataset } from "./retrieval.dataset.js"; //examples of questions and expected sections
 import fs from "fs";
 
@@ -12,7 +12,7 @@ const propertyContent = fs.readFileSync(
  *   cd c:\dev\repos\node\2026Ai\01-casino-property-agent-v2-embedding
  *   npx tsx evaluation/retrieval.eval.ts
  * for each testin the dataset,
- * -run the searchPropertyContent method
+ * -run the searchProperty method (embedding with fallback to keyword)
  * -extract the citations that search has found
  * -calculate the accuracy of the search
  *  (at least one of the expected sections should be found in the retrieved citations)
@@ -20,7 +20,7 @@ const propertyContent = fs.readFileSync(
 async function runEvaluation() {
   let correct = 0;
   for (const test of retrievalDataset) {
-    const result = await searchPropertyContent(
+    const result = await searchProperty( //embedding with fallback to keyword
       test.question,
       propertyContent
     );

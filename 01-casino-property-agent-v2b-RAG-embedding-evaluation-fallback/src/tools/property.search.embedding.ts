@@ -1,28 +1,25 @@
 /**
- * What this gives you:
-	• semantic search
-	• chunk embedding cache
-   same output shape as before: chunks and citations
-
- * given the user's question,
- * how can we find the most relevant sections for the question?
- *  * 
- * **V1 (exact match,older approach, keyword overlap)
- *   Split the markdown (property file) by `##`, 
- *   break the question into words,
- *   score each section:
- *   how many words from the question appear in the section.
- *   problem:
- *   “where can i eat around the casino?” has no answers 
- *   while  “what restaurants are there?” gest answers.
+ * property.search.embedding.ts
+ * Responsibility: semantic retrieval
+ * 
+ * Short:
+ * It should
+ * -split chunks      (split the property file into chunks)
+ * -embed chunks      (calculate the embedding vector for each chunk)
+ * -embed query       (calculate the embedding vector for the question)
+ * -cosine similarity (calculate the cosine similarity between the question vector and the chunks vectors)
+ * -return chunks + citations + method= embedding + maybe top score
  *
- * **V2 (embeddings,this file) **
+ * Details:
+ * given the user's question,
+ * we find the most relevant sections for the question using the following steps:
  * 1. Split the markdown (property file) into chunks by `##`
- * 2. "chunks embedding" (cacluate the embedding vector for each chunk)
+ * 2. "chunks embedding" 
+ *    (cacluate the embedding vector for each chunk)
  *    foreach chunck in the property file, 
  *    call api to calculate embedding vector 
  *    and cache it in memory
- *    Note: each wmbedding involves API call
+ *    Note: each embedding involves API call
  *    Note: caching saves us the need to embed the property file for each user question.
  *    whole property file on every user question.
  * 3. "question embedding"
@@ -30,15 +27,17 @@
  *    to get he embedding vector for the question
  *   
  * 4. score the chunks
- *    to find semilatiry betwenn the question
- *    and the chunks in the property file
- *    we calcule rank each chunk
- *    by cacluating the cosine similarity
- *    (between the question vector and the chunks vector)
+ *    each time we get a question
+ *    we need to cacluate the embedding vector of the question,
+ *    retrieve the embedding vectors of the property file chunks
+ *    and calculate semilatiry between the question and the chunks
+ *    by cacluating the cosine similarity between the question vector and the chunks vectors
  *    higher score ≈ more semantically similar.
+ * 
  * 5. Drop weak matches (below `RETRIEVAL_MIN_SCORE`), 
  *    sort best-first,
  *    take the top `maxChunks`.
+ * 
  * 6. Return the same shape as before: **chunks** (full section text) and **citations** (usually
  *    the section heading line, e.g. `## Dining`, `## Parking`, `## Spa`, `## Entertainment`, `## Promotions`, `## Rooms`, `## Amenities`).
  *
@@ -61,6 +60,7 @@
 
 import { env } from "../config/env.js";
 import { embedText, embedTexts } from "./embedding.service.js";
+import { PropertyChunk, PropertySearchResult, splitIntoChunks } from "./property.search.shared.js";
 
 
 
@@ -91,7 +91,6 @@ let cachedPropertyHash: string | null = null;
  * given the user’s question and the full property markdown, 
  * return the most relevant sections
  * using **semantic** similarity (embeddings = embedding vectors),
- * not keyword matching.
  *
  * **Parameters**
  * - `question` — what the user asked (any natural phrasing).
@@ -102,16 +101,18 @@ let cachedPropertyHash: string | null = null;
  * For each selected section: the **chunk** text and a **citation** string (section header).
  * Empty question ⇒ empty result. If nothing scores above the minimum similarity threshold, empty.
  */
-export async function searchPropertyContent(
+export async function  searchPropertyByEmbedding(
   question: string,
   propertyContent: string,
   maxChunks = env.retrievalTopK
-): Promise<SearchResult> {
+): Promise<PropertySearchResult> {
   const normalizedQuestion = question.trim();
   if (!normalizedQuestion) {
     return {
       chunks: [],
-      citations: []
+      citations: [],
+      retrievalMethod: "embedding",
+      topScore: undefined
     };
   }
   //step1: embed the property file chunks if needed
@@ -119,7 +120,9 @@ export async function searchPropertyContent(
   if (cachedChunks.length === 0) {
     return {
       chunks: [],
-      citations: []
+      citations: [],
+      retrievalMethod: "embedding",
+      topScore: undefined
     };
   }
 
@@ -141,55 +144,50 @@ export async function searchPropertyContent(
   if (bestMatches.length === 0) {
     return {
       chunks: [],
-      citations: []
+      citations: [],
+      retrievalMethod: "embedding",
+      topScore: undefined
     };
   }
 
   return {
     chunks: bestMatches.map((item) => item.chunk.text),
-    citations: bestMatches.map((item) => item.chunk.citation)
+    citations: bestMatches.map((item) => item.chunk.citation),
+    retrievalMethod: "embedding",
+    topScore: bestMatches[0]?.score
   };
 }
 
-export interface SearchResult {
-  chunks: string[];
-  citations: string[];
-}
 
 
 /**
  * Caclulate the (cached embedding vectors) if neeed
  * -flow:
- * - step1: calculate the hash over the content of the property file
- * - step2: if the hash did not change, return 
- *          (property file did not change, no need to calculate the embedding vectors of the file)
-  * - step3: Otherwise (the content of the file has changed since we last cached its embedding vectors)
- *    3.1 re-split: split the file content to chunks
- *    3.2 re-embed all chunks: cacluate the embedding vector for each chunk 
  *    3.3refresh cache: we update the cached chunks
  */
 async function EmbedPropertyChunksIfNeeded(propertyContent: string): Promise<void> {
   //step1: calculate the hash over the content of the property file
   const contentHash = calcContentHash(propertyContent);
-  //step2: if the hash did not change, return 
+  //step2: if the hash did not change, return \
+  //       (property file did not change, no need to calculate the embedding vectors of the file)
   if (cachedPropertyHash === contentHash && cachedChunks.length > 0) {
     return;
   }
   //step3.1: split the file content to chunks
-  const rawChunks = splitIntoChunks(propertyContent);
-  if (rawChunks.length === 0) { //update cache and return
+  const rawChunks: PropertyChunk[] = splitIntoChunks(propertyContent);
+  if (rawChunks.length === 0) { 
     cachedPropertyHash = contentHash;
     cachedChunks = [];
     return;
   }
 
   //step3.2: calculate the embedding vector for each chunk
-  const embeddings: number[][]= await embedTexts(rawChunks);
+  const embeddings: number[][]= await embedTexts(rawChunks.map((chunk) => chunk.text));
 
   //step3.3: update the cache
-  cachedChunks = rawChunks.map((text, index) => ({
-    text,
-    citation: extractCitation(text),
+  cachedChunks = rawChunks.map((chunk, index) => ({
+    text: chunk.text,
+    citation:  chunk.citation,
     embedding: embeddings[index]
   }));
   cachedPropertyHash = contentHash;
@@ -211,20 +209,16 @@ function calcContentHash(value: string): string {
  * Split markdown into sections using `##` headings.
  * First segment may be preamble before the first `##`; others get `## ` prepended so headings stay in the chunk.
  * Allows indentation before `##` (e.g. template strings with leading spaces on heading lines).
- */
+
 function splitIntoChunks(markdown: string): string[] {
   return markdown
     .split(/\n\s*##\s+/)
     .map((part, index) => (index === 0 ? part.trim() : `## ${part.trim()}`))
     .filter(Boolean);
 }
-/**
- * Use the first line of each chunk as the citation string.
- * Example: chunk starts with `## Restaurants` → citation is `## Restaurants`.
- */
-function extractCitation(chunk: string): string {
-  return chunk.split("\n")[0]?.trim() ?? "property.md";
-}
+*/
+
+
 
 
 /**

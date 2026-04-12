@@ -6,22 +6,22 @@
  * ensure it returns no chunks when it does not find any relevent chunks in the knowledge content
  */
 
-import { searchPropertyContent } from "../src/tools/property.search.js";
+import { searchPropertyByEmbedding } from "../src/tools/property.search.embedding.js";
 import { embedText, embedTexts } from "../src/tools/embedding.service.js";
 
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * The file under test is property.search.ts
+ * The file under test is property.search.embedding.ts
  * it has import call to 
  * { embedText, embedTexts } from "./embedding.service.js";
  * that calculate the embedding vectors by calling the OpenAI API.
  * 
- * idea: to test the property.search.ts file,
- *       we want property.search.ts to use our fake embedding module
+ * idea: to test the property.search.embedding.ts file,
+ *       we want property.search.embedding.ts to use our fake embedding module
  *       instead of the real embedding module.
- *       meaning, during the test of property.search.ts,
+ *       meaning, during the test of property.search.embedding.ts,
  *       it will not call openAI API to calculate the embedding vectors.
  *       instead, it will use our fake embedding module to calculate the embedding vectors.
     
@@ -35,10 +35,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
       embedTexts: vi.fn()
     }));
 
-    describe("property search", () => {
+    describe("property search by embedding", () => {
       beforeEach(() => {
         vi.clearAllMocks();
       });
+
+
+
 
     it("returns the restaurants section when it is most semantically similar", async () => {
         const propertyContent = `
@@ -65,7 +68,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
     //step3: call the searchPropertyContent function
     //       note: when the test calls embedTexts or embedText,
     //       it will return the mock value
-    const result = await searchPropertyContent("Where can I eat?", propertyContent);
+    const result = await searchPropertyByEmbedding("Where can I eat?", propertyContent);
     
     expect(result.chunks.length).toBeGreaterThan(0);
     expect(result.chunks[0]).toContain("Restaurants");
@@ -73,6 +76,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
   });
 
 
+
+  
   it("returns no chunks when similarity is too low", async () => {
     const propertyContent = `
       # Test Property
@@ -85,7 +90,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
           [0, 1]
         ]);
     vi.mocked(embedText).mockResolvedValue([-1, -1]);
-    const result = await searchPropertyContent("Tell me about ski slopes", propertyContent);
+    const result = await searchPropertyByEmbedding("Tell me about ski slopes", propertyContent);
     expect(result.chunks).toEqual([]);
     expect(result.citations).toEqual([]);
   });

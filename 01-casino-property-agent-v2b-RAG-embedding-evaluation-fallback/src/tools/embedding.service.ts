@@ -49,6 +49,7 @@ function getEmbeddingModel(): OpenAIEmbeddings {
   return embeddingsClient;
 }
 
+
 /**
  * Converts **one piece of text** into **one embedding vector** (an ordered list of numbers).
  *
@@ -91,3 +92,13 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   const model = getEmbeddingModel();
   return model.embedDocuments(texts);
 }
+
+
+///
+/*
+
+
+
+
+
+*/
