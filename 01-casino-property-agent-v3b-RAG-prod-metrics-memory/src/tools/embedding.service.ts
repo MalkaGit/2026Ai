@@ -1,6 +1,7 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { createEmbeddingModel } from "./embedding.factory.js";
 import { env } from "../config/env.js";
+import { recordEmbeddingCall } from "../infra/observability/metrics/ai.metrics.service.js";
 
 /**
  * Embedding service:
@@ -81,7 +82,9 @@ function getEmbeddingModel(): OpenAIEmbeddings {
  */
 export async function embedText(text: string): Promise<number[]> {
   const model = getEmbeddingModel();
-  return model.embedQuery(text);
+  const result =  model.embedQuery(text);
+  recordEmbeddingCall();
+  return result;
 }
 
 /**
@@ -90,7 +93,9 @@ export async function embedText(text: string): Promise<number[]> {
  */
 export async function embedTexts(texts: string[]): Promise<number[][]> {
   const model = getEmbeddingModel();
-  return model.embedDocuments(texts);
+  const result = model.embedDocuments(texts);
+  recordEmbeddingCall(texts.length);
+  return result;
 }
 
 

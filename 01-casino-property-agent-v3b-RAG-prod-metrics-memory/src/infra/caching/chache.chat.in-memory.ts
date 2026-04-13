@@ -1,4 +1,5 @@
 import type { ChatResponse } from "../../api/chat/chat.types.js";
+import { recordChatCacheExpired, recordChatCacheHit, recordChatCacheMiss, recordChatCacheSize } from "../observability/metrics/cache.metrics.service.js";
 /**
  * chat.cache.in-memory.ts
  * Simple in-memory cache for chat responses.
@@ -52,6 +53,7 @@ export function setCachedChatResponse(
       value: response,
       createdAt: Date.now()
     });
+    recordChatCacheSize(cache.size);
   }
 
 
@@ -66,15 +68,20 @@ export function getCachedChatResponse(
   const entry = cache.get(key);
   if (!entry) {
     //case1: key not found in the cache
+    recordChatCacheMiss();
     return null;
   }
 
   if (Date.now() - entry.createdAt > TTL_MS) {
     //case2: key found in the cache but expired
     cache.delete(key);
+    recordChatCacheExpired();
+    recordChatCacheMiss();
+    recordChatCacheSize(cache.size);
     return null;
   }
   //case3: key found in the cache and is not expired
+  recordChatCacheHit();
   return entry.value;
 }
 

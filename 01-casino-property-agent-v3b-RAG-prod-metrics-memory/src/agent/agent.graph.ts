@@ -35,6 +35,7 @@ import { AIMessageChunk } from "@langchain/core/messages";
 import { createChatModel } from "../tools/llm.factory.js";
 import { traceAgentStart, traceAgentRetrieval, traceAgentNoContext, traceAgentFinish, traceAgentFailure, traceCacheHit, traceCacheMiss, traceCacheSet } from "../infra/logging/ai.logger.js";
 import { getCachedChatResponse, setCachedChatResponse } from "../infra/caching/chache.chat.in-memory.js";
+import { recordAiRequestFailed, recordAiRequestLatency, recordAiRequestSucceeded, recordEmptyRetrieval, recordLlmCall, recordLlmError } from "../infra/observability/metrics/ai.metrics.service.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
@@ -77,6 +78,8 @@ export async function askPropertyAgent(question: string): Promise<ChatResponse> 
     const cached = getCachedChatResponse(question, propertyName);
     if (cached) {
         traceCacheHit(question);
+        recordAiRequestSucceeded();
+        recordAiRequestLatency(Date.now() - startedAt);    
         return cached;
     }
 
@@ -121,7 +124,8 @@ export async function askPropertyAgent(question: string): Promise<ChatResponse> 
       answerLength: chatResponse.answer.length,
       durationMs: Date.now() - startedAt
     });
-
+    recordAiRequestSucceeded();
+    recordAiRequestLatency(Date.now() - startedAt);
   return chatResponse;
 }
 catch (error) {
@@ -130,6 +134,8 @@ catch (error) {
     durationMs: Date.now() - startedAt,
     error
   });
+  recordAiRequestFailed();
+  recordAiRequestLatency(Date.now() - startedAt);
   throw error;
 }
 }
@@ -180,6 +186,7 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
   //case1: couldnt find relevant information in the knowledge file
   if (state.retrievedChunks.length === 0) {
     traceAgentNoContext(state.question);
+    recordEmptyRetrieval();
     return {
       answer:
         "I do not know based on the provided property information.",
@@ -204,16 +211,26 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
     question: state.question,
     contextChunks: state.retrievedChunks
   });
-  const response :AIMessageChunk = await model.invoke([
-    {
-      role: "system",
-      content: systemRules
-    },
-    {
-      role: "user",
-      content: prompt
-    }
-  ]);
+
+  let response :AIMessageChunk;
+  try {
+      response = await model.invoke([
+      {
+        role: "system",
+        content: systemRules
+      },
+      {
+        role: "user",
+        content: prompt
+      }
+    ]);
+  }
+  catch (error) {
+    recordLlmError();
+    throw error;
+  }
+  
+  recordLlmCall();
   const answerText =
     typeof response.content === "string"
       ? response.content

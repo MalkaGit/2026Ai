@@ -286,6 +286,47 @@
         }
       },
       "response": []
+    },
+    {
+      "name": "Chat - Test case5 - metrics",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": " {\"message\":\"where can i eat around the casino ?\"}\r\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:3000/debug/metrics",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "debug",
+            "metrics"
+          ]
+        }
+      },
+      "response": []
     }
   ]
 }
