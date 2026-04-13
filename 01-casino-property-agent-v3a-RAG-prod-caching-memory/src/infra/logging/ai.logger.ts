@@ -20,6 +20,18 @@ export interface AgentTraceStart {
 
 
 
+
+export function traceCacheHit(question: string) {
+  logInfo("cache.hit", { question });
+}
+export function traceCacheMiss(question: string) {
+  logInfo("cache.miss", { question });
+}
+export function traceCacheSet(question: string) {
+  logInfo("cache.set", { question });
+}
+
+
 //on retrieval completed (keyword or embedding search on property file)
 export function traceAgentRetrieval(input: AgentTraceRetrieval): void {
     logInfo("agent.retrieval.completed", {

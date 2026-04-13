@@ -33,7 +33,8 @@ import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
 import { AIMessageChunk } from "@langchain/core/messages";
 import { createChatModel } from "../tools/llm.factory.js";
-import { traceAgentStart, traceAgentRetrieval, traceAgentNoContext, traceAgentFinish, traceAgentFailure } from "../infra/logging/ai.logger.js";
+import { traceAgentStart, traceAgentRetrieval, traceAgentNoContext, traceAgentFinish, traceAgentFailure, traceCacheHit, traceCacheMiss, traceCacheSet } from "../infra/logging/ai.logger.js";
+import { getCachedChatResponse, setCachedChatResponse } from "../infra/caching/chache.chat.in-memory.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
@@ -71,41 +72,55 @@ function buildGraph() {
 export async function askPropertyAgent(question: string): Promise<ChatResponse> {
   const startedAt = Date.now();
   try {
-  const propertyContent = loadPropertyMarkdown();
-   traceAgentStart({                                            //ovservability: start of the agent
-    question,
-    propertyName: env.propertyName
-  });
+    // STEP 1 — try to get the answer from the cache
+    const propertyName = env.propertyName;
+    const cached = getCachedChatResponse(question, propertyName);
+    if (cached) {
+        traceCacheHit(question);
+        return cached;
+    }
+
+    // STEP 2 — if not found in the cache, generate the answer using the pipeline
+    traceCacheMiss(question); //ovservability: cache miss
+    const propertyContent = loadPropertyMarkdown();
+    traceAgentStart({                                            //ovservability: start of the agent
+       question,
+       propertyName: propertyName
+    });
+    const initialState: AgentState = {
+      question,
+      propertyName: env.propertyName,
+      propertyContent,
+      isInScope: false,
+      rejectionReason: undefined,
+      retrievedChunks: [],
+      citations: [],
+      answer: "",
+      grounded: false
+    };
+    const finalState : Partial<AgentState> = await propertyGraph.invoke(initialState);
+    //console.log("result", finalState);
+    const chatResponse: ChatResponse = {
+      answer: finalState.answer ?? "",
+      property: env.propertyName,
+      grounded: finalState.grounded ?? false,
+      citations: finalState.citations ?? []
+    };
+
+    //STEP 2 — store in cache (only if grounded)
+    if (chatResponse.grounded && chatResponse.answer.length > 0) {
+      setCachedChatResponse(question, propertyName, chatResponse);
+      traceCacheSet(question);
+    }
 
 
-  
-  const initialState: AgentState = {
-    question,
-    propertyName: env.propertyName,
-    propertyContent,
-    isInScope: false,
-    rejectionReason: undefined,
-    retrievedChunks: [],
-    citations: [],
-    answer: "",
-    grounded: false
-  };
-  const finalState : Partial<AgentState> = await propertyGraph.invoke(initialState);
-  console.log("result", finalState);
-  const chatResponse: ChatResponse = {
-    answer: finalState.answer ?? "",
-    property: env.propertyName,
-    grounded: finalState.grounded ?? false,
-    citations: finalState.citations ?? []
-  };
-
-  traceAgentFinish({                                 //ovservability: finish of the agent
-    question,
-    grounded: chatResponse.grounded,
-    citations: chatResponse.citations,
-    answerLength: chatResponse.answer.length,
-    durationMs: Date.now() - startedAt
-  });
+    traceAgentFinish({                                 //ovservability: finish of the agent
+      question,
+      grounded: chatResponse.grounded,
+      citations: chatResponse.citations,
+      answerLength: chatResponse.answer.length,
+      durationMs: Date.now() - startedAt
+    });
 
   return chatResponse;
 }

@@ -4,7 +4,13 @@ export interface ChatRequest {
     message: string;
   }
 
-
+/**
+ * ChatResponse
+ * - answer: the answer to the question
+ * - property: the property name
+ * - grounded: whether the answer is grounded in the knowledge file
+ * - citations: the citations used to answer the question
+ */
 export interface ChatResponse {
     answer: string;
     property: string;
