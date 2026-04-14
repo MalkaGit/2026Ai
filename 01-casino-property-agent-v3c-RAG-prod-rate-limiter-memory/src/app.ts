@@ -4,7 +4,6 @@ import chatRouter from "./api/chat/chat.route.js";
 import { getChatCacheStats } from "./infra/observability/metrics/cache.metrics.service.js";
 import { getAllMetrics } from "./infra/observability/metrics/metrics.repo.in-memory.js";
 import { getAiStats } from "./infra/observability/metrics/ai.metrics.service.js";
-
 export function createApp() {
   const app = express();
 
@@ -23,7 +22,6 @@ export function createApp() {
     });
   });
 
-   
   app.use("/chat", chatRouter);
   return app;
 }

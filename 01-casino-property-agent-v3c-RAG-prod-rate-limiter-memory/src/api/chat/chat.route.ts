@@ -10,9 +10,11 @@ import { askPropertyAgent } from "../../agent/agent.graph.js";
 import { Router } from "express";
 import { ChatRequest, chatRequestSchema, ChatResponse } from "./chat.types.js";
 import { z } from "zod";
+import { rateLimitMiddleware } from "../../middleware/rateLimit.middleware.js";
 
 
 const router = Router();
+router.use(rateLimitMiddleware);
 
 router.post("/", async (req, res) => {
   try {
