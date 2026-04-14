@@ -36,6 +36,9 @@ import { createChatModel } from "../tools/llm.factory.js";
 import { traceAgentStart, traceAgentRetrieval, traceAgentNoContext, traceAgentFinish, traceAgentFailure, traceCacheHit, traceCacheMiss, traceCacheSet } from "../infra/logging/ai.logger.js";
 import { getCachedChatResponse, setCachedChatResponse } from "../infra/caching/chache.chat.in-memory.js";
 import { recordAiRequestFailed, recordAiRequestLatency, recordAiRequestSucceeded, recordEmptyRetrieval, recordLlmCall, recordLlmError } from "../infra/observability/metrics/ai.metrics.service.js";
+import { logError, logInfo } from "../infra/logging/logger.js";
+import { parseAndValidate } from "../infra/validation/schema.validation.zod.js";
+import { AgentOutputSchema } from "./agent.output.schema.js";
 
 //defining the agent flow chart as a pipe using langraph
 const propertyGraph = buildGraph();
@@ -182,14 +185,14 @@ async function retrieveContextNode(state: AgentState): Promise<Partial<AgentStat
 }
 
 async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState>> {
+  const fallbackAnswer = "I do not know based on the provided property information.";
 
   //case1: couldnt find relevant information in the knowledge file
   if (state.retrievedChunks.length === 0) {
     traceAgentNoContext(state.question);
     recordEmptyRetrieval();
     return {
-      answer:
-        "I do not know based on the provided property information.",
+      answer: fallbackAnswer,
       grounded: false
     };
   }
@@ -212,9 +215,38 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
     contextChunks: state.retrievedChunks
   });
 
-  let response :AIMessageChunk;
   try {
-      response = await model.invoke([
+  const structuredLlmResponseAsText: string = await callLLM(model, systemRules, prompt);
+  logInfo("Structured llm response:", { structuredLlmResponseAsText });
+  const validationResult = parseAndValidate(structuredLlmResponseAsText, AgentOutputSchema);
+  if (!validationResult.success) {
+    logError("Failed to parse structured llm response", { error: validationResult.error });
+  }
+  return {
+    answer: validationResult.data?.answer ?? fallbackAnswer,
+    grounded: validationResult.data?.grounded ?? false
+  };
+}
+catch (error) {
+  return {
+    answer:  fallbackAnswer,
+    grounded: false
+  };
+}  //return parseStructuredLlmResponse(structuredLlmResponseAsText, fallbackAnswer);
+}
+
+
+
+async function callLLM(
+  model:  ReturnType<typeof createChatModel>,
+  systemRules: string,
+  prompt: string
+): Promise<string> {
+  recordLlmCall(); // count attempt BEFORE call
+
+  try 
+  {
+    const response: AIMessageChunk = await model!.invoke([
       {
         role: "system",
         content: systemRules
@@ -224,27 +256,61 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
         content: prompt
       }
     ]);
-  }
-  catch (error) {
-    recordLlmError();
+
+    if (typeof response.content === "string") {
+      return response.content.trim();
+    }
+
+    if (Array.isArray(response.content)) {
+      return response.content
+        .map((part) => ("text" in part ? part.text : ""))
+        .join("")
+        .trim();
+    }
+
+    return "";
+  } catch (error) {
+    recordLlmError(); // only on failure
     throw error;
-  }
-  
-  recordLlmCall();
-  const answerText =
-    typeof response.content === "string"
-      ? response.content
-      : Array.isArray(response.content)
-        ? response.content
-            .map((item) => ("text" in item ? item.text : ""))
-            .join("")
-        : "I do not know based on the provided property information.";
-  return {
-    answer: answerText.trim(),
-    grounded: true
-  };
+}
 }
 
+
+
+function parseStructuredLlmResponse(
+  structuredLlmResponseAsText: string,
+  fallbackAnswer: string
+): Partial<AgentState> {
+  try {
+    const parsed = JSON.parse(structuredLlmResponseAsText) as {
+      //using the format defined in the agent prompt as the llm response schema
+      answer?: unknown;
+      citations?: unknown;
+      grounded?: unknown;
+
+    };
+    const result: Partial<AgentState> = 
+    {
+      answer:
+        typeof parsed.answer === "string" && parsed.answer.trim().length > 0
+          ? parsed.answer.trim()
+          : fallbackAnswer,
+      grounded:
+        typeof parsed.grounded === "boolean"
+          ? parsed.grounded
+          : false
+    };
+
+    return result;
+  } catch (error) {
+    logError("Failed to parse structured llm response", { error });
+    throw error;
+    return {
+      answer: fallbackAnswer,
+      grounded: false
+    };
+  }
+}
 
 function buildFallbackAnswerWithoutLLM(state: AgentState): string {
   //when LLM api key is not set in the environment variables
