@@ -224,7 +224,8 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
   }
   return {
     answer: validationResult.data?.answer ?? fallbackAnswer,
-    grounded: validationResult.data?.grounded ?? false
+    grounded: validationResult.data?.grounded ?? false,
+    citations: validationResult.data?.citations ?? []
   };
 }
 catch (error) {
@@ -277,40 +278,6 @@ async function callLLM(
 
 
 
-function parseStructuredLlmResponse(
-  structuredLlmResponseAsText: string,
-  fallbackAnswer: string
-): Partial<AgentState> {
-  try {
-    const parsed = JSON.parse(structuredLlmResponseAsText) as {
-      //using the format defined in the agent prompt as the llm response schema
-      answer?: unknown;
-      citations?: unknown;
-      grounded?: unknown;
-
-    };
-    const result: Partial<AgentState> = 
-    {
-      answer:
-        typeof parsed.answer === "string" && parsed.answer.trim().length > 0
-          ? parsed.answer.trim()
-          : fallbackAnswer,
-      grounded:
-        typeof parsed.grounded === "boolean"
-          ? parsed.grounded
-          : false
-    };
-
-    return result;
-  } catch (error) {
-    logError("Failed to parse structured llm response", { error });
-    throw error;
-    return {
-      answer: fallbackAnswer,
-      grounded: false
-    };
-  }
-}
 
 function buildFallbackAnswerWithoutLLM(state: AgentState): string {
   //when LLM api key is not set in the environment variables
