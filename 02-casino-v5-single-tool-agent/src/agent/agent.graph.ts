@@ -1,33 +1,44 @@
 /**
- * agent.graph.ts
- * business flow only
- * Generates answer to a given question based on the property knowledge.
- * agent steps (steps are implemented as graph nodes using langraph):
- *      1. scopeCheck:       determines if the question is allowed
- * *                        - request for actions is rejected (no booking, reservations, payments)
- *                          - request for unrelated questions is rejected
- *      2. reject            (optional)
- *      3. retrieve Context:  search sections within the property knowledge that are relevent to the question
- *                           for now, using exact match.
- *                                    eg, it can answer "what restaurants are there?" by finding the "Restaurants" section in the property file.
- *                                    but it cannot answer "where can i eat around the  casino ?" because the "there is no eat keyworkd in the property file"
- *                                    chunk rank is the number of tokens from the question that are found in the chunk)
- *                           later on, we can use similarity search to find the most relevant chunks
- *                                     eg, eat and restaurant are similar, but eat and weather are not
- *                           later on, we can use embedding search (2 words are semialr if their vector distance is small)   
- *      4. LLM               pass the LLM the chunks that we found, to generate answers based on it 
- * - Limitations:
- * - knowledge is limited to a single property knowledge file (property.md)
- *   no multi-property support
- *   later on we can ingest knowledge from other files and sources.
- * - no conversation memory 
+ * LangGraph definition for the single-property casino agent.
+ *
+ * What this small graph is meant to illustrate:
+ * - The model proposes the next step (here: retrieve context vs answer without retrieval).
+ * - That proposal is structured output, parsed and validated (Zod).
+ * - Routing is explicit graph edges keyed off the validated decision.
+ * - Nodes perform I/O (retrieval, LLM calls); the graph wires order and branching.
+ *
+ * The same shape scales to multiple tools, longer plans, retries, and session memory.
+ *
+ * End-to-end flow (nodes):
+ *
+ * 1. scopeCheck — Decide whether the user question is allowed (property Q&A only;
+ *    reject bookings, payments, and off-topic asks). Routes to decideAction or reject.
+ *
+ * 2. decideAction — LLM returns `action` + `actionInput`:
+ *    - search_property → retrieveContext, then answerQuestion.
+ *    - answer_directly → answerQuestion only (skips retrieval).
+ *    Malformed or failed parses default to search_property with the original question.
+ *
+ * 3. retrieveContext — Embedding similarity over the property markdown, with keyword
+ *    fallback. Fills `retrievedChunks` / `citations` (e.g. locate a "Restaurants"
+ *    section for dining questions). Uses `actionInput` so the model can lightly
+ *    rewrite the query for search.
+ *
+ * 4. answerQuestion — Final LLM pass: grounded answer from chunks when retrieval ran;
+ *    handles empty context, missing API keys, and parse errors with safe fallbacks.
+ *
+ * Edges: START → scopeCheck → (decideAction | reject) → … → END;
+ * reject ends with a short, non-grounded refusal message.
+ *
+ * Limitations: single property file (no multi-property); no conversational memory
+ * beyond this invocation (additional sources/memory can be added later).
  */
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { env } from "../config/env.js";
 import { loadPropertyMarkdown } from "../tools/property.loader.js";
 import { searchProperty } from "../tools/property.search.orchestrator.js";
-import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.prompts.js";
+import { buildAnswerPrompt, SYSTEM_RULES } from "./agent.answer.prompts.js";
 import type { AgentState } from "./agent.state.js";
 import type { ChatResponse } from "../api/chat/chat.types.js";
 import { evaluateQuestionScope } from "../tools/scope.service.js";
@@ -39,38 +50,79 @@ import { recordAiRequestFailed, recordAiRequestLatency, recordAiRequestSucceeded
 import { logError, logInfo } from "../infra/logging/logger.js";
 import { parseAndValidate } from "../infra/validation/schema.validation.zod.js";
 import { AgentOutputSchema } from "./agent.output.schema.js";
+import { AgentDecisionSchema } from "./agent.decision.schema.js";
+import { buildDecisionPrompt } from "./agent.decision.prompts.js";
 
-//defining the agent flow chart as a pipe using langraph
+/** Compiled graph: linear where possible, branches on scope and LLM decision. */
 const propertyGraph = buildGraph();
+
+/**
+ * Builds the StateGraph channels and wiring.
+ *
+ * Routing summary:
+ * - scopeCheck → decideAction if in scope, else reject → END.
+ * - decideAction → retrieveContext when action is search_property, else answerQuestion.
+ * - retrieveContext always flows to answerQuestion; answerQuestion and reject → END.
+ */
 function buildGraph() {
   return new StateGraph<AgentState>({
     channels: {
-      //the agent state is passed between nodes as a dictionary of values
+      /** User question for this run. */
       question: null,
+      /** Display name of the loaded property (from config). */
       propertyName: null,
+      /** Full markdown body loaded once per `askPropertyAgent` invocation. */
       propertyContent: null,
+      /** Set by scopeCheck: whether the question may proceed. */
       isInScope: null,
+      /** Human-readable reason when out of scope (shown on reject path). */
       rejectionReason: null,
+      /** decideAction: search_property | answer_directly. */
+      action: null,
+      /** Optional query rewrite for retrieval / answering (defaults to question). */
+      actionInput: null,
+      /** retrieveContext: text slices returned by search. */
       retrievedChunks: null,
+      /** retrieveContext: source references for grounding. */
       citations: null,
+      /** answerQuestion / reject: final natural-language reply. */
       answer: null,
+      /** Whether the answer is claimed grounded in retrieved material. */
       grounded: null
     }
   })
     .addNode("scopeCheck", scopeCheckNode)
+    .addNode("decideAction", decideActionNode)
     .addNode("retrieveContext", retrieveContextNode)
     .addNode("answerQuestion", answerQuestionNode)
     .addNode("reject", rejectNode)
     .addEdge(START, "scopeCheck")
     .addConditionalEdges("scopeCheck", routeAfterScope, {
-      retrieveContext: "retrieveContext",
+      decideAction: "decideAction",
       reject: "reject"
+    })
+    .addConditionalEdges("decideAction", routeAfterDecision, {
+      retrieveContext: "retrieveContext",
+      answerQuestion: "answerQuestion"
     })
     .addEdge("retrieveContext", "answerQuestion")
     .addEdge("answerQuestion", END)
     .addEdge("reject", END)
     .compile();
 }
+
+function routeAfterScope(state: AgentState): string {
+  // In scope → structured decision node; out of scope → refusal without LLM routing.
+  return state.isInScope ? "decideAction" : "reject";
+}
+
+
+function routeAfterDecision(state: AgentState): string {
+  return state.action === "search_property"
+    ? "retrieveContext"
+    : "answerQuestion";
+}
+
 
 //main function to ask the agent a question
 export async function askPropertyAgent(question: string): Promise<ChatResponse> {
@@ -153,9 +205,59 @@ return {
   };
 }
 
-function routeAfterScope(state: AgentState): string {
-  return state.isInScope ? "retrieveContext" : "reject";
+
+
+
+/**
+ * call llm to decide the next action to take (search_property or answer_directly),
+ * validates & parse the llm json response to get the action and actionInput.
+*  On error, default to search_property action.
+ * @param state 
+ * @returns: the action      - the action that the agent should run 
+ *           the actionInput - the question that the agent should pass to the tool  (lets the LLM slightly rewire the user's question if useful)
+ */
+async function decideActionNode(state: AgentState): Promise<Partial<AgentState>> {
+  const model = createChatModel();
+  if (!model) {
+    return {
+      action: "search_property",
+      actionInput: state.question
+    };
+  }
+
+  const prompt = buildDecisionPrompt({
+    propertyName: state.propertyName,
+    question: state.question
+  });
+
+  //calling llm (withthe model and the prompt)
+  //to decide the next action to take (search_property or answer_directly)
+  try {
+      const rawDecisionText = await callLLM(model, SYSTEM_RULES, prompt);
+      const validationResult = parseAndValidate(
+        rawDecisionText,
+        AgentDecisionSchema
+      );
+      if (!validationResult.success || !validationResult.data) {
+        logError("Failed to parse structured llm response for decideAction node. Defaulting to search_property action.", { error: validationResult.error });
+        return {
+          action: "search_property",
+          actionInput: state.question
+        };
+      }
+      return {
+        action: validationResult.data.action,
+        actionInput: validationResult.data.actionInput ?? state.question
+      };
+  } catch (error) {
+      logError("Failed to decide the next action to take. Defaulting to search_property action.", { error });
+      return {
+        action: "search_property",
+       actionInput: state.question
+      };
+  }
 }
+
 
 async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
   return {
@@ -166,10 +268,19 @@ async function rejectNode(state: AgentState): Promise<Partial<AgentState>> {
     citations: []
   };
 }
-
+/**
+ * call searchProperty tool to retrieve context from the property file
+ * Note: instead of sending searchProperty the user's question, state.question, 
+ * we send the actionInput that the llm returned on the decideAction node (llm may slightly rewire the user's question if useful)
+ * @param state: the agent state
+ * @returns 
+ */
 async function retrieveContextNode(state: AgentState): Promise<Partial<AgentState>> {
-  const result = await searchProperty(state.question, state.propertyContent);
-  //console.log("retrieval method:", result.retrievalMethod, "topScore:", result.topScore);
+  //const result = await searchProperty(state.question, state.propertyContent);
+
+  const searchQuestion = state.actionInput ?? state.question; 
+  const result = await searchProperty(searchQuestion, state.propertyContent);
+  console.log("retrieval method:", result.retrievalMethod, "topScore:", result.topScore);
   traceAgentRetrieval({
     question: state.question,
     retrievalMethod: result.retrievalMethod,
@@ -178,12 +289,23 @@ async function retrieveContextNode(state: AgentState): Promise<Partial<AgentStat
     retrievedChunkCount: result.chunks.length
   });
 
-  return {
+return {
     retrievedChunks: result.chunks,
     citations: result.citations
   };
 }
 
+/**
+ * called if decion is answer_directly
+ * if decision is search_property, 
+ * the search property tool is called in the retrieveContext node
+ * and then this method is called
+ * if decision is answer_directly, 
+ * this method is called directly
+ * without calling the search property tool
+ * @param state 
+ * @returns 
+ */
 async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState>> {
   const fallbackAnswer = "I do not know based on the provided property information.";
 
@@ -193,7 +315,8 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
     recordEmptyRetrieval();
     return {
       answer: fallbackAnswer,
-      grounded: false
+      grounded: false,
+      citations: []
     };
   }
 
@@ -203,7 +326,8 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
   if (!model) {
     return {
       answer: buildFallbackAnswerWithoutLLM(state),
-      grounded: state.retrievedChunks.length > 0
+      grounded: state.retrievedChunks.length > 0,
+      citations: []
     };
   }
 
@@ -231,13 +355,22 @@ async function answerQuestionNode(state: AgentState): Promise<Partial<AgentState
 catch (error) {
   return {
     answer:  fallbackAnswer,
-    grounded: false
+    grounded: false,
+    citations: []
   };
 }  //return parseStructuredLlmResponse(structuredLlmResponseAsText, fallbackAnswer);
 }
 
 
-
+/**
+ * call llm api 
+ * - to decide the next action to take (search_property or answer_directly)
+ * - to generate answer based on context retrieved from the knowledge file
+ * @param model:       the model to call llm api
+ * @param systemRules: the system rules to send to llm
+ * @param prompt:      the prompt to send to llm
+ * @returns:           the answer generated by llm
+ */
 async function callLLM(
   model:  ReturnType<typeof createChatModel>,
   systemRules: string,

@@ -1,19 +1,17 @@
 /**
- * agent.prompts.ts
- * Instructions for the agent.
- * This is simple text that can be used by any LLM provider.
- * Note: instructing the llm to return the answer in the structured output format (see important section)
- */
-
-/**
- * agent.prompts.ts
- * Instructions for the agent.
- * This is simple text that can be used by any LLM provider.
+ * agent.answer.prompts.ts
+ * given user question,
+ * the agent calls the llm to generate the answer to the user's question.
  * 
- * Includes strict structured output enforcement (JSON),
- * grounding rules, and safe behavior constraints.
- */
-
+ * this prompt file contains the instructions that
+ * the agent send to the llm. 
+ * 
+ * Instructions includes:
+ * - the logic that the llm should apply
+ *   eg, use the property context to answer the question
+ * - the schema of the answer that llm should return
+ *   (structured output format)
+ */ 
 export function buildAnswerPrompt(input: {
   propertyName: string;
   question: string;
